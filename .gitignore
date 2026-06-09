@@ -10,3 +10,8 @@ DerivedData/
 
 # Local logs
 *.log
+
+# Local source materials not used by the app runtime
+cat-picture/
+cat-sprites/*.bak
+cat-sprites/generated-walk/
