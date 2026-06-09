@@ -106,6 +106,51 @@ build/SkillsPetLite-bin
 
 如果磁盘路径不可用，程序会自动回退到 App Bundle 资源。
 
+## Local Pet Packs
+
+现在支持最简单的本地宠物素材包模式，不用改代码。
+
+把你自己的宠物素材放到：
+
+```text
+~/SkillsPetLite/pets/<your-pet-name>/
+```
+
+程序会自动扫描 `pets/` 下第一个可用目录，并优先读取里面的图片；缺的帧会自动回退到默认 `cat-sprites/`。
+
+推荐文件名：
+
+```text
+recline.png
+loaf.png
+sit.png
+sleep.png
+walk_01.png
+walk_02.png
+walk_03.png
+walk_04.png
+walk_05.png
+walk_06.png
+```
+
+也兼容当前项目默认文件名，例如：
+
+```text
+cat_idle_recline_v1.png
+cat_idle_loaf_v1.png
+cat_sit_v1.png
+cat_sleep_curl_v1.png
+cat_walk_01_v1.png
+...
+cat_walk_04_v1.png
+```
+
+建议：
+
+- 优先用透明背景 PNG
+- `walk_01` 到 `walk_06` 尺寸和落脚点尽量一致
+- 就算只放一部分图也能启动，缺失的姿态会回退到默认猫素材
+
 ## Tech Stack
 
 - Swift

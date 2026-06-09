@@ -84,6 +84,7 @@ final class PetView: NSView {
     private var clickReaction: CGFloat = 0
     private var previousPose: Pose = .recline
     private var begReach: CGFloat = 0
+    private var edgeRestPending = false
 
     init(frame frameRect: NSRect, external: ExternalPaths) {
         self.external = external
@@ -143,7 +144,7 @@ final class PetView: NSView {
             return
         }
 
-        triggerClickReaction()
+        triggerClickReaction(at: event.locationInWindow)
         dragOrigin = NSEvent.mouseLocation
         windowOrigin = window?.frame.origin
         dragTargetOrigin = window?.frame.origin
@@ -225,6 +226,10 @@ final class PetView: NSView {
 
         if currentPose == .walk {
             moveWalkIfNeeded()
+            if edgeRestPending, edgePause <= 0 {
+                edgeRestPending = false
+                setPose(edgeRestPose())
+            }
         }
 
         if let definition = poses[currentPose], poseElapsed >= definition.stateDuration {
@@ -237,7 +242,8 @@ final class PetView: NSView {
     private func advancePose() {
         guard !poseOrder.isEmpty else { return }
         previousPose = currentPose
-        currentPoseIndex = (currentPoseIndex + 1) % poseOrder.count
+        let nextPose = suggestedNextPose(after: currentPose)
+        currentPoseIndex = poseOrder.firstIndex(of: nextPose) ?? ((currentPoseIndex + 1) % poseOrder.count)
         resetPoseTiming()
     }
 
@@ -256,6 +262,7 @@ final class PetView: NSView {
         lookTarget = 0
         if currentPose == .walk {
             walkIntroPause = 0.75
+            edgeRestPending = false
         }
         if previousPose == .sleep && (currentPose == .sit || currentPose == .stretch) {
             stretchProgress = 1
@@ -302,12 +309,14 @@ final class PetView: NSView {
         if origin.x <= minX {
             origin.x = minX
             walkDirection = 1
-            edgePause = 0.7
+            edgePause = 0.9
+            edgeRestPending = true
             triggerClickReaction()
         } else if origin.x >= maxX {
             origin.x = maxX
             walkDirection = -1
-            edgePause = 0.7
+            edgePause = 0.9
+            edgeRestPending = true
             triggerClickReaction()
         }
 
@@ -381,12 +390,72 @@ final class PetView: NSView {
         }
     }
 
-    private func triggerClickReaction() {
+    private func triggerClickReaction(at point: NSPoint? = nil) {
         clickReaction = 1
         tailTargetAngle = 0.16
         tailReturning = false
         earTargetAngle = -0.16
         earReturning = false
+        if let point {
+            lookTarget = point.x < bounds.midX ? -12 : 12
+        } else {
+            lookTarget = walkDirection < 0 ? -10 : 10
+        }
+        if currentPose != .walk, currentPose != .sleep, poseElapsed > 1.0,
+           [.recline, .loaf, .sit].contains(currentPose) {
+            setPose(.play)
+        }
+    }
+
+    private func suggestedNextPose(after pose: Pose) -> Pose {
+        switch activityBand() {
+        case .night:
+            switch pose {
+            case .sleep: return .loaf
+            case .walk, .play, .beg: return .sleep
+            case .stretch: return .sit
+            default: return Bool.random() ? .sleep : .loaf
+            }
+        case .evening:
+            if pose == .walk { return Bool.random() ? .sit : .loaf }
+            if pose == .sleep { return .stretch }
+            if pose == .play || pose == .beg { return .sit }
+            return [.walk, .loaf, .sit, .recline, .stretch].randomElement() ?? .sit
+        case .day:
+            if pose == .sleep { return .stretch }
+            if pose == .walk { return Bool.random() ? .sit : .loaf }
+            if pose == .recline || pose == .loaf { return Bool.random() ? .walk : .play }
+            return [.walk, .play, .beg, .sit, .loaf, .stretch].randomElement() ?? .walk
+        }
+    }
+
+    private func edgeRestPose() -> Pose {
+        switch activityBand() {
+        case .night:
+            return .sleep
+        case .evening:
+            return Bool.random() ? .loaf : .sit
+        case .day:
+            return [.sit, .loaf, .recline].randomElement() ?? .sit
+        }
+    }
+
+    private enum ActivityBand {
+        case day
+        case evening
+        case night
+    }
+
+    private func activityBand() -> ActivityBand {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 22...23, 0...6:
+            return .night
+        case 18...21:
+            return .evening
+        default:
+            return .day
+        }
     }
 
     private func transformState(for pose: Pose) -> (scale: CGFloat, verticalOffset: CGFloat, shadowAlpha: CGFloat) {

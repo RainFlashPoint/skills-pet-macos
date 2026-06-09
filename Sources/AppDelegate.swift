@@ -126,6 +126,13 @@ struct ExternalPaths {
         let kind: String
     }
 
+    private struct SpriteAlias {
+        let packCandidates: [String]
+    }
+
+    private static var cachedPetPackDirectoryPath: String?
+    private static var didResolvePetPackDirectory = false
+
     private let home = FileManager.default.homeDirectoryForCurrentUser
     private let base = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Desktop", isDirectory: true)
@@ -146,10 +153,17 @@ struct ExternalPaths {
         base.appendingPathComponent("skills-pet-macos/cat-sprites", isDirectory: true)
     }
 
+    var petPacksRootURL: URL {
+        home
+            .appendingPathComponent("SkillsPetLite", isDirectory: true)
+            .appendingPathComponent("pets", isDirectory: true)
+    }
+
     func loadSprite(named fileName: String) -> NSImage? {
-        let diskURL = spriteDirectoryURL.appendingPathComponent(fileName)
-        if let image = NSImage(contentsOf: diskURL) {
-            return processedSprite(from: image)
+        for candidate in resolvedSpriteCandidateURLs(for: fileName) {
+            if let image = NSImage(contentsOf: candidate) {
+                return processedSprite(from: image)
+            }
         }
 
         let nsName = NSString(string: fileName)
@@ -161,7 +175,7 @@ struct ExternalPaths {
             return processedSprite(from: image)
         }
 
-        debugLog("failed to load sprite: \(diskURL.path)")
+        debugLog("failed to load sprite for name: \(fileName)")
         return nil
     }
 
@@ -193,6 +207,127 @@ struct ExternalPaths {
             }
         }
         return nil
+    }
+
+    private func resolvedSpriteCandidateURLs(for fileName: String) -> [URL] {
+        var candidates: [URL] = []
+        if let petPackDirectory = discoveredPetPackDirectory() {
+            let alias = spriteAlias(for: fileName)
+            for candidateName in alias.packCandidates {
+                candidates.append(petPackDirectory.appendingPathComponent(candidateName))
+            }
+        }
+        candidates.append(spriteDirectoryURL.appendingPathComponent(fileName))
+        return candidates
+    }
+
+    private func discoveredPetPackDirectory() -> URL? {
+        if Self.didResolvePetPackDirectory {
+            return Self.cachedPetPackDirectoryPath.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        }
+
+        Self.didResolvePetPackDirectory = true
+        let root = petPacksRootURL
+        guard let directories = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        let sorted = directories.sorted {
+            $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
+        }
+
+        for directory in sorted {
+            guard isUsablePetPackDirectory(directory) else { continue }
+            Self.cachedPetPackDirectoryPath = directory.path
+            debugLog("using local pet pack: \(directory.path)")
+            return directory
+        }
+        return nil
+    }
+
+    private func isUsablePetPackDirectory(_ directory: URL) -> Bool {
+        guard let values = try? directory.resourceValues(forKeys: [.isDirectoryKey]),
+              values.isDirectory == true else {
+            return false
+        }
+
+        let probeNames = [
+            "recline.png",
+            "idle_recline.png",
+            "cat_idle_recline_v1.png",
+            "sit.png",
+            "cat_sit_v1.png",
+            "walk_01.png",
+            "cat_walk_01_v1.png"
+        ]
+
+        return probeNames.contains { probe in
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent(probe).path)
+        }
+    }
+
+    private func spriteAlias(for fileName: String) -> SpriteAlias {
+        switch fileName {
+        case "cat_idle_recline_v1.png":
+            return SpriteAlias(packCandidates: [
+                "recline.png",
+                "idle_recline.png",
+                fileName
+            ])
+        case "cat_idle_loaf_v1.png":
+            return SpriteAlias(packCandidates: [
+                "loaf.png",
+                "idle_loaf.png",
+                fileName
+            ])
+        case "cat_sit_v1.png":
+            return SpriteAlias(packCandidates: [
+                "sit.png",
+                fileName
+            ])
+        case "cat_sleep_curl_v1.png":
+            return SpriteAlias(packCandidates: [
+                "sleep.png",
+                "sleep_curl.png",
+                fileName
+            ])
+        case "cat_walk_01_v1.png":
+            return SpriteAlias(packCandidates: [
+                "walk_01.png",
+                fileName
+            ])
+        case "cat_walk_01b_v1.png":
+            return SpriteAlias(packCandidates: [
+                "walk_02.png",
+                fileName
+            ])
+        case "cat_walk_02_v1.png":
+            return SpriteAlias(packCandidates: [
+                "walk_03.png",
+                fileName
+            ])
+        case "cat_walk_03_v1.png":
+            return SpriteAlias(packCandidates: [
+                "walk_04.png",
+                fileName
+            ])
+        case "cat_walk_03b_v1.png":
+            return SpriteAlias(packCandidates: [
+                "walk_05.png",
+                fileName
+            ])
+        case "cat_walk_04_v1.png":
+            return SpriteAlias(packCandidates: [
+                "walk_06.png",
+                fileName
+            ])
+        default:
+            return SpriteAlias(packCandidates: [fileName])
+        }
     }
 
     private func ensureGeneratedCatalogFile(named fileName: String, title: String) -> URL? {
