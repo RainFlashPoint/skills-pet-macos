@@ -160,6 +160,7 @@ cat_walk_04_v1.png
 
 ## Release
 
+- 最新发布说明：`docs/releases/v0.1.1.md`
 - 首个发布说明：`docs/releases/v0.1.0.md`
 - 发布流程说明：`RELEASING.md`
 
