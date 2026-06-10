@@ -58,6 +58,7 @@ final class PetView: NSView {
     private var poseElapsed: TimeInterval = 0
     private var frameElapsed: TimeInterval = 0
     private var motionPhase: CGFloat = 0
+    private var dockMotionPhase: CGFloat = 0
     private var walkDirection: CGFloat = -1
     private var dragOrigin: NSPoint?
     private var windowOrigin: NSPoint?
@@ -128,9 +129,10 @@ final class PetView: NSView {
         let maxHeight = bounds.height - 32
         let scale = min(maxWidth / frameImage.size.width, maxHeight / frameImage.size.height) * drawState.scale
         let drawSize = NSSize(width: frameImage.size.width * scale, height: frameImage.size.height * scale)
+        let dockOffset = dockedMotionOffset(for: currentPose)
         let baseRect = NSRect(
-            x: (bounds.width - drawSize.width) / 2 + lookOffset + earTwitchOffset().x,
-            y: (bounds.height - drawSize.height) / 2 + drawState.verticalOffset + earTwitchOffset().y,
+            x: (bounds.width - drawSize.width) / 2 + lookOffset + earTwitchOffset().x + dockOffset.x,
+            y: (bounds.height - drawSize.height) / 2 + drawState.verticalOffset + earTwitchOffset().y + dockOffset.y,
             width: drawSize.width,
             height: drawSize.height
         )
@@ -208,9 +210,6 @@ final class PetView: NSView {
     }
 
     @objc private func startWalk() {
-        if behaviorMode == .docked {
-            setBehaviorMode(.roaming)
-        }
         setPose(.walk)
     }
 
@@ -224,6 +223,7 @@ final class PetView: NSView {
 
     private func tick() {
         motionPhase += 0.09
+        dockMotionPhase += 0.07
         poseElapsed += Constants.tickInterval
         frameElapsed += Constants.tickInterval
         updateDragVisual()
@@ -283,9 +283,6 @@ final class PetView: NSView {
         }
         if previousPose == .sleep && (currentPose == .sit || currentPose == .stretch) {
             stretchProgress = 1
-        }
-        if behaviorMode == .docked, currentPose == .walk {
-            setPose(preferredDockPose())
         }
     }
 
@@ -360,12 +357,11 @@ final class PetView: NSView {
     }
 
     private func updateDragVisual() {
-        if behaviorMode == .docked {
-            dragVisualProgress += (0 - dragVisualProgress) * 0.18
-            return
-        }
         let target: CGFloat = dragOrigin == nil ? 0 : 1
         dragVisualProgress += (target - dragVisualProgress) * 0.24
+        if behaviorMode == .docked {
+            dragVisualProgress *= 0.92
+        }
     }
 
     private func updateDragMotion() {
@@ -432,8 +428,10 @@ final class PetView: NSView {
             lookTarget = walkDirection < 0 ? -10 : 10
         }
         if behaviorMode == .docked {
-            if currentPose != .sleep, poseElapsed > 1.0, [.recline, .loaf, .sit].contains(currentPose) {
-                setPose(preferredDockPose())
+            if currentPose == .sleep {
+                setPose(.stretch)
+            } else if currentPose != .walk, poseElapsed > 1.0 {
+                setPose(.walk)
             }
         } else if currentPose != .walk, currentPose != .sleep, poseElapsed > 1.0,
                   [.recline, .loaf, .sit].contains(currentPose) {
@@ -474,17 +472,14 @@ final class PetView: NSView {
 
     private func dockedNextPose(after pose: Pose) -> Pose {
         switch pose {
-        case .sleep: return .loaf
-        case .walk, .play, .beg:
-            return .sit
-        case .stretch:
-            return .recline
-        case .recline:
-            return .loaf
-        case .sit:
-            return Bool.random() ? .loaf : .recline
-        case .loaf:
-            return Bool.random() ? .sit : .recline
+        case .sleep: return .stretch
+        case .walk: return Bool.random() ? .sit : .loaf
+        case .play: return .walk
+        case .beg: return .walk
+        case .stretch: return Bool.random() ? .walk : .sit
+        case .recline: return .walk
+        case .sit: return Bool.random() ? .walk : .loaf
+        case .loaf: return Bool.random() ? .walk : .recline
         }
     }
 
@@ -497,16 +492,6 @@ final class PetView: NSView {
         case .day:
             return [.sit, .loaf, .recline].randomElement() ?? .sit
         }
-    }
-
-    private func preferredDockPose() -> Pose {
-        if poses[.loaf] != nil {
-            return .loaf
-        }
-        if poses[.sit] != nil {
-            return .sit
-        }
-        return .recline
     }
 
     private func modeMenuItem() -> NSMenuItem {
@@ -539,7 +524,6 @@ final class PetView: NSView {
             windowOrigin = nil
             dragTargetOrigin = nil
             dragReleaseVelocity = .zero
-            setPose(preferredDockPose())
         }
         needsDisplay = true
     }
@@ -552,7 +536,6 @@ final class PetView: NSView {
             windowOrigin = nil
             dragTargetOrigin = nil
             dragReleaseVelocity = .zero
-            setPose(preferredDockPose())
         }
         needsDisplay = true
     }
@@ -635,6 +618,34 @@ final class PetView: NSView {
                 verticalOffset: sin(motionPhase * 0.45) * 1.5 + dragLift,
                 shadowAlpha: 0.14 + dragShadowBoost
             )
+        }
+    }
+
+    private func dockedMotionOffset(for pose: Pose) -> CGPoint {
+        guard behaviorMode == .docked else { return .zero }
+
+        let breath = sin(dockMotionPhase * 0.8) * 1.8
+        let sway = sin(dockMotionPhase * 1.3) * 2.8
+        let tap = abs(sin(dockMotionPhase * 2.1)) * 1.4
+        let clickNudge = clickReaction * 4
+
+        switch pose {
+        case .walk:
+            return CGPoint(x: sway * 1.6 + clickNudge * 0.2, y: tap + breath * 0.8)
+        case .play:
+            return CGPoint(x: sway * 0.8, y: tap * 1.4 + breath * 1.6 + clickNudge * 0.2)
+        case .beg:
+            return CGPoint(x: sway * 0.5, y: tap * 1.0 + breath * 2.0 + clickNudge * 0.15)
+        case .stretch:
+            return CGPoint(x: sway * 0.6, y: breath * 2.4 + tap)
+        case .sleep:
+            return CGPoint(x: sway * 0.15, y: breath * 0.45)
+        case .recline:
+            return CGPoint(x: sway * 0.45, y: breath * 1.2)
+        case .sit:
+            return CGPoint(x: sway * 0.7, y: breath * 1.4 + tap * 0.8)
+        case .loaf:
+            return CGPoint(x: sway * 0.4, y: breath * 1.0)
         }
     }
 
