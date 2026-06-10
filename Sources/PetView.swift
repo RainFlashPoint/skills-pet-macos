@@ -49,6 +49,7 @@ final class PetView: NSView {
     private let external: ExternalPaths
     private static let preferredPoseOrder: [Pose] = [.recline, .play, .beg, .walk, .sit, .loaf, .stretch, .walk, .sleep, .sit]
 
+    private var behaviorMode: PetBehaviorMode
     private let poses: [Pose: PoseDefinition]
     private let poseOrder: [Pose]
 
@@ -86,8 +87,9 @@ final class PetView: NSView {
     private var begReach: CGFloat = 0
     private var edgeRestPending = false
 
-    init(frame frameRect: NSRect, external: ExternalPaths) {
+    init(frame frameRect: NSRect, external: ExternalPaths, behaviorMode: PetBehaviorMode) {
         self.external = external
+        self.behaviorMode = behaviorMode
         let builtPoses = PetView.buildPoses(external: external)
         self.poses = builtPoses
         self.poseOrder = PetView.buildPoseOrder(from: builtPoses)
@@ -145,6 +147,7 @@ final class PetView: NSView {
         }
 
         triggerClickReaction(at: event.locationInWindow)
+        guard behaviorMode == .roaming else { return }
         dragOrigin = NSEvent.mouseLocation
         windowOrigin = window?.frame.origin
         dragTargetOrigin = window?.frame.origin
@@ -152,11 +155,13 @@ final class PetView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard behaviorMode == .roaming else { return }
         dragOrigin = nil
         windowOrigin = nil
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard behaviorMode == .roaming else { return }
         guard let dragOrigin, let windowOrigin, let window else { return }
         let current = NSEvent.mouseLocation
         let dx = current.x - dragOrigin.x
@@ -173,6 +178,7 @@ final class PetView: NSView {
         let menu = NSMenu()
         menu.addItem(withTitle: "Open Skills Hub", action: #selector(openHub), keyEquivalent: "")
         menu.addItem(withTitle: "Open Catalog", action: #selector(openCatalog), keyEquivalent: "")
+        menu.addItem(modeMenuItem())
         menu.addItem(withTitle: "Switch Pose", action: #selector(switchPose), keyEquivalent: "")
         menu.addItem(withTitle: "Start Walk", action: #selector(startWalk), keyEquivalent: "")
         menu.addItem(.separator())
@@ -189,11 +195,22 @@ final class PetView: NSView {
         external.openCatalog()
     }
 
+    @objc private func setRoamingMode() {
+        setBehaviorMode(.roaming)
+    }
+
+    @objc private func setDockedMode() {
+        setBehaviorMode(.docked)
+    }
+
     @objc private func switchPose() {
         advancePose()
     }
 
     @objc private func startWalk() {
+        if behaviorMode == .docked {
+            setBehaviorMode(.roaming)
+        }
         setPose(.walk)
     }
 
@@ -224,7 +241,7 @@ final class PetView: NSView {
             currentFrameIndex = (currentFrameIndex + 1) % definition.frames.count
         }
 
-        if currentPose == .walk {
+        if behaviorMode == .roaming, currentPose == .walk {
             moveWalkIfNeeded()
             if edgeRestPending, edgePause <= 0 {
                 edgeRestPending = false
@@ -242,7 +259,7 @@ final class PetView: NSView {
     private func advancePose() {
         guard !poseOrder.isEmpty else { return }
         previousPose = currentPose
-        let nextPose = suggestedNextPose(after: currentPose)
+        let nextPose = suggestedNextPose(after: currentPose, mode: behaviorMode)
         currentPoseIndex = poseOrder.firstIndex(of: nextPose) ?? ((currentPoseIndex + 1) % poseOrder.count)
         resetPoseTiming()
     }
@@ -267,6 +284,9 @@ final class PetView: NSView {
         if previousPose == .sleep && (currentPose == .sit || currentPose == .stretch) {
             stretchProgress = 1
         }
+        if behaviorMode == .docked, currentPose == .walk {
+            setPose(preferredDockPose())
+        }
     }
 
     private func currentFrame() -> NSImage? {
@@ -287,6 +307,7 @@ final class PetView: NSView {
     }
 
     private func moveWalkIfNeeded() {
+        guard behaviorMode == .roaming else { return }
         guard dragOrigin == nil, let window = window else { return }
         if walkIntroPause > 0 {
             walkIntroPause -= Constants.tickInterval
@@ -339,11 +360,20 @@ final class PetView: NSView {
     }
 
     private func updateDragVisual() {
+        if behaviorMode == .docked {
+            dragVisualProgress += (0 - dragVisualProgress) * 0.18
+            return
+        }
         let target: CGFloat = dragOrigin == nil ? 0 : 1
         dragVisualProgress += (target - dragVisualProgress) * 0.24
     }
 
     private func updateDragMotion() {
+        guard behaviorMode == .roaming else {
+            dragTargetOrigin = nil
+            dragReleaseVelocity = .zero
+            return
+        }
         guard let window = window else { return }
 
         if let dragTargetOrigin {
@@ -401,13 +431,26 @@ final class PetView: NSView {
         } else {
             lookTarget = walkDirection < 0 ? -10 : 10
         }
-        if currentPose != .walk, currentPose != .sleep, poseElapsed > 1.0,
-           [.recline, .loaf, .sit].contains(currentPose) {
+        if behaviorMode == .docked {
+            if currentPose != .sleep, poseElapsed > 1.0, [.recline, .loaf, .sit].contains(currentPose) {
+                setPose(preferredDockPose())
+            }
+        } else if currentPose != .walk, currentPose != .sleep, poseElapsed > 1.0,
+                  [.recline, .loaf, .sit].contains(currentPose) {
             setPose(.play)
         }
     }
 
-    private func suggestedNextPose(after pose: Pose) -> Pose {
+    private func suggestedNextPose(after pose: Pose, mode: PetBehaviorMode) -> Pose {
+        switch mode {
+        case .docked:
+            return dockedNextPose(after: pose)
+        case .roaming:
+            return roamingNextPose(after: pose)
+        }
+    }
+
+    private func roamingNextPose(after pose: Pose) -> Pose {
         switch activityBand() {
         case .night:
             switch pose {
@@ -429,6 +472,22 @@ final class PetView: NSView {
         }
     }
 
+    private func dockedNextPose(after pose: Pose) -> Pose {
+        switch pose {
+        case .sleep: return .loaf
+        case .walk, .play, .beg:
+            return .sit
+        case .stretch:
+            return .recline
+        case .recline:
+            return .loaf
+        case .sit:
+            return Bool.random() ? .loaf : .recline
+        case .loaf:
+            return Bool.random() ? .sit : .recline
+        }
+    }
+
     private func edgeRestPose() -> Pose {
         switch activityBand() {
         case .night:
@@ -438,6 +497,64 @@ final class PetView: NSView {
         case .day:
             return [.sit, .loaf, .recline].randomElement() ?? .sit
         }
+    }
+
+    private func preferredDockPose() -> Pose {
+        if poses[.loaf] != nil {
+            return .loaf
+        }
+        if poses[.sit] != nil {
+            return .sit
+        }
+        return .recline
+    }
+
+    private func modeMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "Mode")
+        submenu.addItem(modeMenuEntry(title: PetBehaviorMode.roaming.title, action: #selector(setRoamingMode), isSelected: behaviorMode == .roaming))
+        submenu.addItem(modeMenuEntry(title: PetBehaviorMode.docked.title, action: #selector(setDockedMode), isSelected: behaviorMode == .docked))
+        item.submenu = submenu
+        return item
+    }
+
+    private func modeMenuEntry(title: String, action: Selector, isSelected: Bool) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.state = isSelected ? .on : .off
+        return item
+    }
+
+    private func setBehaviorMode(_ mode: PetBehaviorMode) {
+        guard behaviorMode != mode else { return }
+        behaviorMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "petBehaviorMode")
+        (window as? PetWindow)?.setBehaviorMode(mode)
+
+        if mode == .roaming {
+            dragVisualProgress = 0
+            edgeRestPending = false
+        } else {
+            dragOrigin = nil
+            windowOrigin = nil
+            dragTargetOrigin = nil
+            dragReleaseVelocity = .zero
+            setPose(preferredDockPose())
+        }
+        needsDisplay = true
+    }
+
+    func applyBehaviorMode(_ mode: PetBehaviorMode) {
+        guard behaviorMode != mode else { return }
+        behaviorMode = mode
+        if mode == .docked {
+            dragOrigin = nil
+            windowOrigin = nil
+            dragTargetOrigin = nil
+            dragReleaseVelocity = .zero
+            setPose(preferredDockPose())
+        }
+        needsDisplay = true
     }
 
     private enum ActivityBand {

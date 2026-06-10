@@ -34,11 +34,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func recenterPet() {
-        ensurePetWindow(forceCenter: true)
+        ensurePetWindow(forceCenter: false)
+        petWindow?.setBehaviorMode(.roaming)
+        petWindow?.moveToVisibleCenter()
+        refreshStatusMenu()
     }
 
     @objc private func showPet() {
         ensurePetWindow(forceCenter: true)
+    }
+
+    @objc private func setRoamingMode() {
+        setPetMode(.roaming)
+    }
+
+    @objc private func setDockedMode() {
+        setPetMode(.docked)
     }
 
     @objc private func quitApp() {
@@ -48,19 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "Pet"
-
-        let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Open Skills Hub", action: #selector(openHub), keyEquivalent: "o"))
-        menu.addItem(NSMenuItem(title: "Open Catalog", action: #selector(openCatalog), keyEquivalent: "c"))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Show Pet", action: #selector(showPet), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "Center Pet", action: #selector(recenterPet), keyEquivalent: "r"))
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
-
-        menu.items.forEach { $0.target = self }
-        item.menu = menu
         statusItem = item
+        refreshStatusMenu()
     }
 
     private func startVisibilityWatchdog() {
@@ -101,6 +101,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         debugLog("petWindow assigned: \(self.petWindow != nil)")
+    }
+
+    private func setPetMode(_ mode: PetBehaviorMode) {
+        ensurePetWindow(forceCenter: false)
+        petWindow?.setBehaviorMode(mode)
+        refreshStatusMenu()
+    }
+
+    private func refreshStatusMenu() {
+        guard let statusItem else { return }
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "Open Skills Hub", action: #selector(openHub), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: "Open Catalog", action: #selector(openCatalog), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(modeMenuItem())
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Show Pet", action: #selector(showPet), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: "Center Pet", action: #selector(recenterPet), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+
+        menu.items.forEach { $0.target = self }
+        statusItem.menu = menu
+    }
+
+    private func modeMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: "Mode")
+        let currentMode = petWindow?.behaviorMode ?? .roaming
+
+        let roamingItem = NSMenuItem(title: PetBehaviorMode.roaming.title, action: #selector(setRoamingMode), keyEquivalent: "")
+        roamingItem.target = self
+        roamingItem.state = currentMode == .roaming ? .on : .off
+        submenu.addItem(roamingItem)
+
+        let dockedItem = NSMenuItem(title: PetBehaviorMode.docked.title, action: #selector(setDockedMode), keyEquivalent: "")
+        dockedItem.target = self
+        dockedItem.state = currentMode == .docked ? .on : .off
+        submenu.addItem(dockedItem)
+
+        item.submenu = submenu
+        return item
     }
 }
 

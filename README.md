@@ -84,6 +84,7 @@ build/SkillsPetLite-bin
 - 双击：打开本地 `Skills Hub`
 - 右键：打开快捷菜单
 - 状态栏菜单：显示桌宠、居中桌宠、打开 Hub / Catalog、退出
+- 模式切换：`自由乱动` / `右下角停靠`
 
 ## Local Integration
 
