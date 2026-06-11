@@ -56,6 +56,8 @@ printf 'APPL????' > "$PKGINFO_PATH"
 swiftc \
   -O \
   -framework AppKit \
+  -framework Vision \
+  -framework Security \
   "$ROOT"/Sources/*.swift \
   -o "$TMP_BIN"
 

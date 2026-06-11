@@ -12,6 +12,7 @@
 - 透明无边框悬浮窗，跨 Space 显示
 - 支持拖拽、双击、右键菜单、状态栏菜单
 - 包含 `walk`、`sleep`、`sit`、`loaf`、`recline` 等姿态
+- 支持从单张本地图片生成自定义宠物素材包
 - 可自动打开本地 `Skills Hub` / `Skills Catalog`
 
 ## Features
@@ -20,6 +21,7 @@
 - 拖拽跟随与释放后的惯性回弹
 - 逐帧精灵动画与状态切换
 - 眨眼、尾巴摆动、耳朵 twitch、拉伸等细节动作
+- 单图导入生成程序化动作素材包
 - 本地 HTML 页面自动发现与兜底生成
 - Xcode 工程和命令行构建脚本两套启动方式
 
@@ -84,6 +86,10 @@ build/SkillsPetLite-bin
 - 双击：打开本地 `Skills Hub`
 - 右键：打开快捷菜单
 - 状态栏菜单：显示桌宠、居中桌宠、打开 Hub / Catalog、退出
+- 状态栏 `Import Pet Image...`：打开导入工作台，添加参考图并配置生成提示词
+- 状态栏 `AI 模型设置...`：配置 AI 增强生成的供应商、模型、Endpoint、质量模式和 API Key
+- 状态栏 `Use Default Cat`：切回内置默认猫素材
+- 状态栏 `语言 / Language`：在中文和英文界面之间切换，默认中文
 - 模式切换：`自由乱动` / `右下角停靠`
 
 ## Local Integration
@@ -110,6 +116,34 @@ build/SkillsPetLite-bin
 ## Local Pet Packs
 
 现在支持最简单的本地宠物素材包模式，不用改代码。
+
+也可以从状态栏菜单点击 `Import Pet Image...` 打开导入工作台。支持添加多张 `png`、`jpg`、`jpeg`、`heic`、`tiff` 或 `webp` 参考图，并配置宠物名称、视觉风格和提示词备注。程序当前会：
+
+- 保存多图和提示词配置到 `import-config.json`
+- 使用第一张参考图作为本地免费兜底输入
+- 裁剪透明边或简单白色背景边缘
+- 在 macOS 14+ 上优先尝试 Apple Vision 前景分割抠图
+- 生成 `recline`、`loaf`、`sit`、`sleep` 和 `walk_01` 到 `walk_06`
+- 写入 `~/SkillsPetLite/pets/<image-name>/`
+- 展示大尺寸预览面板，对比原图、生成姿态和 walk 动态循环，确认后才切换到新宠物
+- 取消预览时自动删除这次生成的候选素材包
+
+如果生成效果不理想，可以从状态栏点击 `Use Default Cat` 切回默认猫。
+
+这是本地程序化生成，不依赖云端模型。它会优先使用系统 Vision 能力做前景分割，再用缩放、压扁、偏移、旋转和当前动画状态机制造动作感；如果要生成真实语义姿态，可以在后续接入可选模型管线。代码里已经把素材生成抽象成 `PetAssetGenerating`，后续可以用 API 模型实现替换当前本地生成器。
+
+## AI Model Settings
+
+状态栏菜单里的 `AI 模型设置...` 已经可以保存模型配置：
+
+- 启用 / 关闭 AI 增强
+- 供应商：OpenAI、fal.ai、Replicate、自定义
+- 模型名称
+- Endpoint URL
+- 质量模式
+- API Key
+
+API Key 会保存到 macOS Keychain；其它配置保存到 `UserDefaults`。当前 `测试配置` 只检查必填项，不会发起网络请求；真实 API 调用会在后续 `ModelPetPackGenerator` 中接入。
 
 把你自己的宠物素材放到：
 

@@ -3,7 +3,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var petWindow: PetWindow?
+    private var aiSettingsWindow: AIModelSettingsWindowController?
     private let external = ExternalPaths()
+    private let petPackGenerator: PetAssetGenerating = PetPackGenerator()
     private var visibilityTimer: Timer?
     private var frontingTimer: Timer?
 
@@ -31,6 +33,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openCatalog() {
         external.openCatalog()
+    }
+
+    @objc private func openAIModelSettings() {
+        let controller = AIModelSettingsWindowController()
+        aiSettingsWindow = controller
+        controller.show()
+    }
+
+    @objc private func importPetImage() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard let candidate = PetImportStudioWindowController(
+            generator: petPackGenerator,
+            rootURL: external.petPacksRootURL
+        ).runModal() else { return }
+
+        if confirmPetPackPreview(candidate.pack, sourceImageURL: candidate.sourceImageURL) {
+            external.selectPetPack(named: candidate.pack.name)
+            reloadPetWindow(forceCenter: true)
+            showMessage(title: L("宠物已导入", "Pet Imported"), message: L("已选择宠物包：\(candidate.pack.name)", "Selected pet pack: \(candidate.pack.name)"))
+        } else {
+            deleteGeneratedPetPack(candidate.pack)
+        }
+    }
+
+    @objc private func useDefaultCat() {
+        external.clearSelectedPetPack()
+        reloadPetWindow(forceCenter: false)
+    }
+
+    @objc private func setChineseLanguage() {
+        setLanguage(.zh)
+    }
+
+    @objc private func setEnglishLanguage() {
+        setLanguage(.en)
     }
 
     @objc private func recenterPet() {
@@ -103,33 +141,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugLog("petWindow assigned: \(self.petWindow != nil)")
     }
 
+    private func reloadPetWindow(forceCenter: Bool) {
+        petWindow?.orderOut(nil)
+        petWindow = PetWindow(external: external)
+        petWindow?.reviveIfNeeded(forceCenter: forceCenter)
+        refreshStatusMenu()
+    }
+
     private func setPetMode(_ mode: PetBehaviorMode) {
         ensurePetWindow(forceCenter: false)
         petWindow?.setBehaviorMode(mode)
         refreshStatusMenu()
     }
 
+    private func showMessage(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = title.contains("Failed") || title.contains("失败") ? .warning : .informational
+        alert.runModal()
+    }
+
+    private func confirmPetPackPreview(_ pack: GeneratedPetPack, sourceImageURL: URL) -> Bool {
+        PetImportPreviewWindowController(pack: pack, sourceImageURL: sourceImageURL).runModal()
+    }
+
+    private func deleteGeneratedPetPack(_ pack: GeneratedPetPack) {
+        do {
+            try FileManager.default.removeItem(at: pack.directory)
+            debugLog("discarded generated pet pack: \(pack.directory.path)")
+        } catch {
+            debugLog("failed to discard generated pet pack \(pack.directory.path): \(error.localizedDescription)")
+        }
+    }
+
     private func refreshStatusMenu() {
         guard let statusItem else { return }
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Open Skills Hub", action: #selector(openHub), keyEquivalent: "o"))
-        menu.addItem(NSMenuItem(title: "Open Catalog", action: #selector(openCatalog), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem(title: L("打开技能中心", "Open Skills Hub"), action: #selector(openHub), keyEquivalent: "o"))
+        menu.addItem(NSMenuItem(title: L("打开技能目录", "Open Catalog"), action: #selector(openCatalog), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem(title: L("导入宠物图片...", "Import Pet Image..."), action: #selector(importPetImage), keyEquivalent: "i"))
+        menu.addItem(NSMenuItem(title: L("AI 模型设置...", "AI Model Settings..."), action: #selector(openAIModelSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: L("切回默认猫", "Use Default Cat"), action: #selector(useDefaultCat), keyEquivalent: "d"))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(modeMenuItem())
+        menu.addItem(languageMenuItem())
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Show Pet", action: #selector(showPet), keyEquivalent: "s"))
-        menu.addItem(NSMenuItem(title: "Center Pet", action: #selector(recenterPet), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: L("显示桌宠", "Show Pet"), action: #selector(showPet), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: L("居中桌宠", "Center Pet"), action: #selector(recenterPet), keyEquivalent: "r"))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L("退出", "Quit"), action: #selector(quitApp), keyEquivalent: "q"))
 
         menu.items.forEach { $0.target = self }
         statusItem.menu = menu
     }
 
     private func modeMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
-        let submenu = NSMenu(title: "Mode")
+        let item = NSMenuItem(title: L("模式", "Mode"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: L("模式", "Mode"))
         let currentMode = petWindow?.behaviorMode ?? .roaming
 
         let roamingItem = NSMenuItem(title: PetBehaviorMode.roaming.title, action: #selector(setRoamingMode), keyEquivalent: "")
@@ -144,6 +214,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.submenu = submenu
         return item
+    }
+
+    private func languageMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: L("语言", "Language"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: L("语言", "Language"))
+
+        let zhItem = NSMenuItem(title: AppLanguage.zh.title, action: #selector(setChineseLanguage), keyEquivalent: "")
+        zhItem.target = self
+        zhItem.state = AppLanguage.current == .zh ? .on : .off
+        submenu.addItem(zhItem)
+
+        let enItem = NSMenuItem(title: AppLanguage.en.title, action: #selector(setEnglishLanguage), keyEquivalent: "")
+        enItem.target = self
+        enItem.state = AppLanguage.current == .en ? .on : .off
+        submenu.addItem(enItem)
+
+        item.submenu = submenu
+        return item
+    }
+
+    private func setLanguage(_ language: AppLanguage) {
+        AppLanguage.current = language
+        refreshStatusMenu()
     }
 }
 
@@ -175,6 +268,7 @@ struct ExternalPaths {
 
     private static var cachedPetPackDirectoryPath: String?
     private static var didResolvePetPackDirectory = false
+    private static let selectedPetPackKey = "selectedPetPackName"
 
     private let home = FileManager.default.homeDirectoryForCurrentUser
     private let base = FileManager.default.homeDirectoryForCurrentUser
@@ -182,13 +276,13 @@ struct ExternalPaths {
 
     var hubURL: URL {
         discoveredCatalogFile(named: "skills_hub.html")
-        ?? ensureGeneratedCatalogFile(named: "skills_hub.html", title: "Local Skills Hub")
+        ?? ensureGeneratedCatalogFile(named: "skills_hub.html", title: L("本地技能中心", "Local Skills Hub"))
         ?? base.appendingPathComponent("skills-catalog/skills_hub.html")
     }
 
     var catalogURL: URL {
         discoveredCatalogFile(named: "skills_catalog.html")
-        ?? ensureGeneratedCatalogFile(named: "skills_catalog.html", title: "Local Skills Catalog")
+        ?? ensureGeneratedCatalogFile(named: "skills_catalog.html", title: L("本地技能目录", "Local Skills Catalog"))
         ?? base.appendingPathComponent("skills-catalog/skills_catalog.html")
     }
 
@@ -228,6 +322,20 @@ struct ExternalPaths {
 
     func openCatalog() {
         openIfPresent(catalogURL, label: "skills catalog")
+    }
+
+    func selectPetPack(named name: String) {
+        UserDefaults.standard.set(name, forKey: Self.selectedPetPackKey)
+        Self.cachedPetPackDirectoryPath = nil
+        Self.didResolvePetPackDirectory = false
+        debugLog("selected pet pack: \(name)")
+    }
+
+    func clearSelectedPetPack() {
+        UserDefaults.standard.removeObject(forKey: Self.selectedPetPackKey)
+        Self.cachedPetPackDirectoryPath = nil
+        Self.didResolvePetPackDirectory = false
+        debugLog("cleared selected pet pack; using default cat")
     }
 
     private func openIfPresent(_ url: URL, label: String) {
@@ -271,24 +379,17 @@ struct ExternalPaths {
 
         Self.didResolvePetPackDirectory = true
         let root = petPacksRootURL
-        guard let directories = try? FileManager.default.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return nil
+
+        if let selectedName = UserDefaults.standard.string(forKey: Self.selectedPetPackKey) {
+            let selectedDirectory = root.appendingPathComponent(selectedName, isDirectory: true)
+            if isUsablePetPackDirectory(selectedDirectory) {
+                Self.cachedPetPackDirectoryPath = selectedDirectory.path
+                debugLog("using selected pet pack: \(selectedDirectory.path)")
+                return selectedDirectory
+            }
+            debugLog("selected pet pack unavailable: \(selectedDirectory.path)")
         }
 
-        let sorted = directories.sorted {
-            $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
-        }
-
-        for directory in sorted {
-            guard isUsablePetPackDirectory(directory) else { continue }
-            Self.cachedPetPackDirectoryPath = directory.path
-            debugLog("using local pet pack: \(directory.path)")
-            return directory
-        }
         return nil
     }
 
@@ -400,8 +501,8 @@ struct ExternalPaths {
         if entries.isEmpty {
             body = """
             <div class="empty">
-              <h2>No local skills found</h2>
-              <p>Put your skills under folders like <code>~/Desktop/skills</code> or <code>~/Desktop/skills-catalog</code>.</p>
+              <h2>\(htmlEscape(L("没有找到本地技能", "No local skills found")))</h2>
+              <p>\(htmlEscape(L("可以把技能目录放到 ~/Desktop/skills 或 ~/Desktop/skills-catalog 这类文件夹下。", "Put your skills under folders like ~/Desktop/skills or ~/Desktop/skills-catalog.")))</p>
             </div>
             """
         } else {
@@ -483,7 +584,7 @@ struct ExternalPaths {
         <body>
           <main>
             <h1>\(htmlEscape(title))</h1>
-            <p>Auto-generated from local folders that look like skills directories. Existing handwritten HTML still wins if found.</p>
+            <p>\(htmlEscape(L("根据本机看起来像技能目录的文件夹自动生成。如果已经有手写 HTML 文件，会优先使用手写版本。", "Auto-generated from local folders that look like skills directories. Existing handwritten HTML still wins if found.")))</p>
             <ul>
               \(body)
             </ul>

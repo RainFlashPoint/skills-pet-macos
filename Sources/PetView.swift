@@ -178,13 +178,13 @@ final class PetView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Open Skills Hub", action: #selector(openHub), keyEquivalent: "")
-        menu.addItem(withTitle: "Open Catalog", action: #selector(openCatalog), keyEquivalent: "")
+        menu.addItem(withTitle: L("打开技能中心", "Open Skills Hub"), action: #selector(openHub), keyEquivalent: "")
+        menu.addItem(withTitle: L("打开技能目录", "Open Catalog"), action: #selector(openCatalog), keyEquivalent: "")
         menu.addItem(modeMenuItem())
-        menu.addItem(withTitle: "Switch Pose", action: #selector(switchPose), keyEquivalent: "")
-        menu.addItem(withTitle: "Start Walk", action: #selector(startWalk), keyEquivalent: "")
+        menu.addItem(withTitle: L("切换姿态", "Switch Pose"), action: #selector(switchPose), keyEquivalent: "")
+        menu.addItem(withTitle: L("开始走路", "Start Walk"), action: #selector(startWalk), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit", action: #selector(quitApp), keyEquivalent: "")
+        menu.addItem(withTitle: L("退出", "Quit"), action: #selector(quitApp), keyEquivalent: "")
         menu.items.forEach { $0.target = self }
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
@@ -495,8 +495,8 @@ final class PetView: NSView {
     }
 
     private func modeMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
-        let submenu = NSMenu(title: "Mode")
+        let item = NSMenuItem(title: L("模式", "Mode"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: L("模式", "Mode"))
         submenu.addItem(modeMenuEntry(title: PetBehaviorMode.roaming.title, action: #selector(setRoamingMode), isSelected: behaviorMode == .roaming))
         submenu.addItem(modeMenuEntry(title: PetBehaviorMode.docked.title, action: #selector(setDockedMode), isSelected: behaviorMode == .docked))
         item.submenu = submenu
