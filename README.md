@@ -137,11 +137,29 @@ build/SkillsPetLite-bin
 状态栏菜单里的 `AI 模型设置...` 已经可以保存模型配置：
 
 - 启用 / 关闭 AI 增强
-- 供应商：OpenAI、fal.ai、Replicate、自定义
+- 供应商：API易、OpenAI、fal.ai、Replicate、自定义
 - 模型名称
 - Endpoint URL
 - 质量模式
 - API Key
+
+默认推荐 `API易`，已预填：
+
+```text
+Provider: API易
+Endpoint: https://api.apiyi.com/v1/images/edits
+Model: gpt-image-2-all
+```
+
+通常只需要填写 API Key；模型名称和 Endpoint 仍然可以手动修改。
+
+如果切换到 `OpenAI`，也会自动预填：
+
+```text
+Provider: OpenAI
+Endpoint: https://api.openai.com/v1/images/edits
+Model: gpt-image-1.5
+```
 
 API Key 会保存到 macOS Keychain；其它配置保存到 `UserDefaults`。当前 `测试配置` 只检查必填项，不会发起网络请求；真实 API 调用会在后续 `ModelPetPackGenerator` 中接入。
 

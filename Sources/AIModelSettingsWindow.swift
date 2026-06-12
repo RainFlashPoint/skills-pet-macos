@@ -82,8 +82,8 @@ final class AIModelSettingsWindowController: NSWindowController {
         stack.addArrangedSubview(title)
 
         let copy = NSTextField(wrappingLabelWithString: L(
-            "这里先保存供应商、模型和密钥。下一步接入 ModelPetPackGenerator 后，导入工作台会优先调用模型，失败再回退本地生成。",
-            "This stores provider, model, and credentials first. Once ModelPetPackGenerator is wired in, the import studio will call the model first and fall back locally on failure."
+            "默认推荐 API易：地址和模型已经填好，通常只需要填写 API Key。下一步接入生成器后，导入工作台会优先调用模型，失败再回退本地生成。",
+            "APIYI is the recommended default: endpoint and model are prefilled, so you usually only need an API key. Once the generator is wired in, the import studio will call the model first and fall back locally on failure."
         ))
         copy.font = .systemFont(ofSize: 13)
         copy.textColor = NSColor(calibratedRed: 0.39, green: 0.30, blue: 0.22, alpha: 1)
@@ -116,7 +116,7 @@ final class AIModelSettingsWindowController: NSWindowController {
         qualityPopup.addItems(withTitles: AIQualityMode.allCases.map(\.title))
         card.addArrangedSubview(labeledControl(L("质量模式", "Quality mode"), qualityPopup))
 
-        modelField.placeholderString = L("模型名称，例如 fal-ai/flux-kontext", "Model name, e.g. fal-ai/flux-kontext")
+        modelField.placeholderString = L("模型名称，例如 gpt-image-2-all", "Model name, e.g. gpt-image-2-all")
         modelField.widthAnchor.constraint(equalToConstant: 600).isActive = true
         card.addArrangedSubview(labeledControl(L("模型", "Model"), modelField))
 

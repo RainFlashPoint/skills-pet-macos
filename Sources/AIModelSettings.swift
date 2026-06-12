@@ -2,6 +2,7 @@ import Foundation
 import Security
 
 enum AIProvider: String, CaseIterable {
+    case apiyi
     case openAI
     case fal
     case replicate
@@ -9,6 +10,7 @@ enum AIProvider: String, CaseIterable {
 
     var title: String {
         switch self {
+        case .apiyi: return "API易"
         case .openAI: return "OpenAI"
         case .fal: return "fal.ai"
         case .replicate: return "Replicate"
@@ -18,7 +20,8 @@ enum AIProvider: String, CaseIterable {
 
     var defaultModel: String {
         switch self {
-        case .openAI: return "gpt-image-2"
+        case .apiyi: return "gpt-image-2-all"
+        case .openAI: return "gpt-image-1.5"
         case .fal: return "fal-ai/flux-kontext"
         case .replicate: return "black-forest-labs/flux-kontext-pro"
         case .custom: return ""
@@ -27,6 +30,7 @@ enum AIProvider: String, CaseIterable {
 
     var defaultEndpoint: String {
         switch self {
+        case .apiyi: return "https://api.apiyi.com/v1/images/edits"
         case .openAI: return "https://api.openai.com/v1/images/edits"
         case .fal: return "https://fal.run/"
         case .replicate: return "https://api.replicate.com/v1/predictions"
@@ -58,9 +62,9 @@ struct AIModelSettings {
 
     static let defaults = AIModelSettings(
         isEnabled: false,
-        provider: .fal,
-        model: AIProvider.fal.defaultModel,
-        endpoint: AIProvider.fal.defaultEndpoint,
+        provider: .apiyi,
+        model: AIProvider.apiyi.defaultModel,
+        endpoint: AIProvider.apiyi.defaultEndpoint,
         qualityMode: .cheap
     )
 }
