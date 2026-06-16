@@ -13,14 +13,14 @@ final class PetView: NSView {
 
         var menuTitle: String {
             switch self {
-            case .recline: return "Recline"
-            case .loaf: return "Loaf"
-            case .sit: return "Sit"
-            case .play: return "Play"
-            case .beg: return "Beg"
-            case .stretch: return "Stretch"
-            case .walk: return "Walk"
-            case .sleep: return "Sleep"
+            case .recline: return L("侧卧", "Recline")
+            case .loaf: return L("蹲坐", "Loaf")
+            case .sit: return L("端坐", "Sit")
+            case .play: return L("玩耍", "Play")
+            case .beg: return L("撒娇", "Beg")
+            case .stretch: return L("伸懒腰", "Stretch")
+            case .walk: return L("走路", "Walk")
+            case .sleep: return L("睡觉", "Sleep")
             }
         }
     }
@@ -87,6 +87,9 @@ final class PetView: NSView {
     private var previousPose: Pose = .recline
     private var begReach: CGFloat = 0
     private var edgeRestPending = false
+    private var terminalNoticeText: String?
+    private var terminalNoticeIsError = false
+    private var terminalNoticeUntil = Date.distantPast
 
     init(frame frameRect: NSRect, external: ExternalPaths, behaviorMode: PetBehaviorMode) {
         self.external = external
@@ -98,6 +101,12 @@ final class PetView: NSView {
 
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleTerminalSessionNotice),
+            name: .terminalAssistantSessionNotice,
+            object: nil
+        )
 
         let timer = Timer.scheduledTimer(withTimeInterval: Constants.tickInterval, repeats: true) { [weak self] _ in
             self?.tick()
@@ -140,6 +149,8 @@ final class PetView: NSView {
         drawShadow(width: drawSize.width, y: max(8, baseRect.minY - 8), alpha: drawState.shadowAlpha)
         drawSprite(frameImage, in: baseRect, mirrored: walkDirection > 0 && currentPose == .walk, pose: currentPose)
         drawBlink(in: baseRect, pose: currentPose)
+        drawTerminalAssistantStatus()
+        drawTerminalSessionNotice()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -181,8 +192,8 @@ final class PetView: NSView {
         menu.addItem(withTitle: L("打开技能中心", "Open Skills Hub"), action: #selector(openHub), keyEquivalent: "")
         menu.addItem(withTitle: L("打开技能目录", "Open Catalog"), action: #selector(openCatalog), keyEquivalent: "")
         menu.addItem(modeMenuItem())
-        menu.addItem(withTitle: L("切换姿态", "Switch Pose"), action: #selector(switchPose), keyEquivalent: "")
-        menu.addItem(withTitle: L("开始走路", "Start Walk"), action: #selector(startWalk), keyEquivalent: "")
+        menu.addItem(poseMenuItem())
+        menu.addItem(withTitle: L("确认助手...", "Approval Assistant..."), action: #selector(openTerminalAssistantSettings), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: L("退出", "Quit"), action: #selector(quitApp), keyEquivalent: "")
         menu.items.forEach { $0.target = self }
@@ -213,8 +224,116 @@ final class PetView: NSView {
         setPose(.walk)
     }
 
+    @objc private func approveFrontmostTerminal() {
+        NotificationCenter.default.post(name: .approveFrontmostTerminalPrompt, object: nil)
+        triggerClickReaction()
+    }
+
+    @objc private func launchCodexCLI() {
+        NotificationCenter.default.post(name: .launchCodexCLI, object: nil)
+        triggerClickReaction()
+    }
+
+    @objc private func launchClaudeCLI() {
+        NotificationCenter.default.post(name: .launchClaudeCLI, object: nil)
+        triggerClickReaction()
+    }
+
+    @objc private func openTerminalAssistantSettings() {
+        NotificationCenter.default.post(name: .openTerminalAssistantSettings, object: nil)
+    }
+
+    @objc private func handleTerminalSessionNotice(_ notification: Notification) {
+        terminalNoticeText = notification.userInfo?["message"] as? String
+        terminalNoticeIsError = (notification.userInfo?["isError"] as? Bool) ?? false
+        terminalNoticeUntil = Date().addingTimeInterval(8)
+        triggerClickReaction()
+        if terminalNoticeIsError {
+            setPose(.loaf)
+        } else {
+            setPose(.play)
+        }
+        needsDisplay = true
+    }
+
     @objc private func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    private func drawTerminalAssistantStatus() {
+        let settings = TerminalAssistantSettingsStore.shared.load()
+        guard settings.isEnabled else { return }
+
+        let agents = TerminalAssistantController.lastDiscoveredAgents
+        guard !agents.isEmpty else { return }
+
+        let names = Array(Set(agents.map { $0.cliKind.commandName })).sorted()
+        let text = L("正在看守 \(names.joined(separator: " / "))", "Watching \(names.joined(separator: " / "))")
+
+        let font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.96)
+        ]
+        let attributed = NSAttributedString(string: text, attributes: attributes)
+        let paddingX: CGFloat = 10
+        let paddingY: CGFloat = 5
+        let textSize = attributed.size()
+        let width = min(bounds.width - 28, textSize.width + paddingX * 2)
+        let rect = NSRect(
+            x: (bounds.width - width) / 2,
+            y: bounds.maxY - 38,
+            width: width,
+            height: textSize.height + paddingY * 2
+        )
+
+        let fill = NSColor(calibratedRed: 0.20, green: 0.32, blue: 0.20, alpha: 0.86)
+        let path = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
+        fill.setFill()
+        path.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.24).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let drawPoint = NSPoint(x: rect.midX - textSize.width / 2, y: rect.midY - textSize.height / 2)
+        attributed.draw(at: drawPoint)
+    }
+
+    private func drawTerminalSessionNotice() {
+        guard Date() < terminalNoticeUntil,
+              let text = terminalNoticeText,
+              !text.isEmpty else {
+            return
+        }
+
+        let font = NSFont.systemFont(ofSize: 12, weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor(calibratedWhite: 1, alpha: 0.98)
+        ]
+        let attributed = NSAttributedString(string: text, attributes: attributes)
+        let paddingX: CGFloat = 12
+        let paddingY: CGFloat = 7
+        let textSize = attributed.size()
+        let width = min(bounds.width - 18, textSize.width + paddingX * 2)
+        let rect = NSRect(
+            x: (bounds.width - width) / 2,
+            y: 14,
+            width: width,
+            height: textSize.height + paddingY * 2
+        )
+        let fill = terminalNoticeIsError
+            ? NSColor(calibratedRed: 0.58, green: 0.18, blue: 0.12, alpha: 0.9)
+            : NSColor(calibratedRed: 0.12, green: 0.38, blue: 0.25, alpha: 0.9)
+        let path = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
+        fill.setFill()
+        path.fill()
+        NSColor(calibratedWhite: 1, alpha: 0.28).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let drawPoint = NSPoint(x: rect.midX - textSize.width / 2, y: rect.midY - textSize.height / 2)
+        attributed.draw(at: drawPoint)
     }
 
     private var currentPose: Pose {
@@ -494,6 +613,27 @@ final class PetView: NSView {
         }
     }
 
+    private func poseMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: L("姿态", "Pose"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: L("姿态", "Pose"))
+        for pose in Pose.allCases {
+            guard poses[pose] != nil else { continue }
+            let entry = NSMenuItem(title: pose.menuTitle, action: #selector(selectPoseFromMenu(_:)), keyEquivalent: "")
+            entry.tag = Pose.allCases.firstIndex(of: pose) ?? 0
+            entry.target = self
+            entry.state = (pose == currentPose) ? .on : .off
+            submenu.addItem(entry)
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func selectPoseFromMenu(_ sender: NSMenuItem) {
+        let allPoses = Pose.allCases
+        guard allPoses.indices.contains(sender.tag) else { return }
+        setPose(allPoses[sender.tag])
+    }
+
     private func modeMenuItem() -> NSMenuItem {
         let item = NSMenuItem(title: L("模式", "Mode"), action: nil, keyEquivalent: "")
         let submenu = NSMenu(title: L("模式", "Mode"))
@@ -614,8 +754,8 @@ final class PetView: NSView {
             )
         case .sleep:
             return (
-                scale: (1 + sin(motionPhase * 0.45) * 0.02) * dragScale,
-                verticalOffset: sin(motionPhase * 0.45) * 1.5 + dragLift,
+                scale: dragScale,
+                verticalOffset: dragLift,
                 shadowAlpha: 0.14 + dragShadowBoost
             )
         }
@@ -890,14 +1030,16 @@ final class PetView: NSView {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         displayTimer?.invalidate()
     }
 
     private static func buildPoses(external: ExternalPaths) -> [Pose: PoseDefinition] {
-        let recline = external.loadSprite(named: "cat_idle_recline_v1.png")
-        let loaf = external.loadSprite(named: "cat_idle_loaf_v1.png")
-        let sit = external.loadSprite(named: "cat_sit_v1.png")
-        let sleep = external.loadSprite(named: "cat_sleep_curl_v1.png")
+        let reclineSingle = external.loadSprite(named: "cat_idle_recline_v1.png")
+        let loafSingle = external.loadSprite(named: "cat_idle_loaf_v1.png")
+        let sitSingle = external.loadSprite(named: "cat_sit_v1.png")
+        let sleepSingle = external.loadSprite(named: "cat_sleep_curl_v1.png")
+
         let walkBase = [
             external.loadSprite(named: "cat_walk_01_v1.png"),
             external.loadSprite(named: "cat_walk_01b_v1.png"),
@@ -909,25 +1051,71 @@ final class PetView: NSView {
         let walk = buildWalkLoop(from: walkBase)
 
         var poses: [Pose: PoseDefinition] = [:]
-        if let recline {
-            poses[.recline] = PoseDefinition(frames: [recline], frameDuration: 0.2, stateDuration: 7.0)
+
+        // Recline: multi-frame or single
+        let reclineFrames = [
+            external.loadSprite(named: "cat_recline_01.png"),
+            external.loadSprite(named: "cat_recline_02.png"),
+            external.loadSprite(named: "cat_recline_03.png"),
+            external.loadSprite(named: "cat_recline_02.png")
+        ].compactMap { $0 }
+        if reclineFrames.count >= 3 {
+            poses[.recline] = PoseDefinition(frames: reclineFrames, frameDuration: 2.0, stateDuration: 7.0)
+        } else if let reclineSingle {
+            poses[.recline] = PoseDefinition(frames: [reclineSingle], frameDuration: 0.2, stateDuration: 7.0)
         }
-        if let loaf {
-            poses[.loaf] = PoseDefinition(frames: [loaf], frameDuration: 0.2, stateDuration: 6.5)
+
+        // Loaf: multi-frame or single
+        let loafFrames = [
+            external.loadSprite(named: "cat_loaf_01.png"),
+            external.loadSprite(named: "cat_loaf_02.png"),
+            external.loadSprite(named: "cat_loaf_03.png"),
+            external.loadSprite(named: "cat_loaf_02.png")
+        ].compactMap { $0 }
+        if loafFrames.count >= 3 {
+            poses[.loaf] = PoseDefinition(frames: loafFrames, frameDuration: 2.0, stateDuration: 6.5)
+        } else if let loafSingle {
+            poses[.loaf] = PoseDefinition(frames: [loafSingle], frameDuration: 0.2, stateDuration: 6.5)
         }
-        if let sit {
-            poses[.sit] = PoseDefinition(frames: [sit], frameDuration: 0.2, stateDuration: 5.8)
-            poses[.play] = PoseDefinition(frames: [sit], frameDuration: 0.2, stateDuration: 4.6)
-            poses[.beg] = PoseDefinition(frames: [sit], frameDuration: 0.2, stateDuration: 4.0)
+
+        // Sit: multi-frame or single
+        let sitFrames = [
+            external.loadSprite(named: "cat_sit_01.png"),
+            external.loadSprite(named: "cat_sit_02.png"),
+            external.loadSprite(named: "cat_sit_03.png"),
+            external.loadSprite(named: "cat_sit_02.png")
+        ].compactMap { $0 }
+        if sitFrames.count >= 3 {
+            poses[.sit] = PoseDefinition(frames: sitFrames, frameDuration: 2.0, stateDuration: 5.8)
+            poses[.play] = PoseDefinition(frames: sitFrames, frameDuration: 0.8, stateDuration: 4.6)
+            poses[.beg] = PoseDefinition(frames: sitFrames, frameDuration: 1.2, stateDuration: 4.0)
+        } else if let sitSingle {
+            poses[.sit] = PoseDefinition(frames: [sitSingle], frameDuration: 0.2, stateDuration: 5.8)
+            poses[.play] = PoseDefinition(frames: [sitSingle], frameDuration: 0.2, stateDuration: 4.6)
+            poses[.beg] = PoseDefinition(frames: [sitSingle], frameDuration: 0.2, stateDuration: 4.0)
         }
-        if let recline {
-            poses[.stretch] = PoseDefinition(frames: [recline], frameDuration: 0.2, stateDuration: 4.2)
+
+        // Stretch: reuse recline frames
+        if let r = reclineFrames.first ?? reclineSingle {
+            poses[.stretch] = PoseDefinition(frames: [r], frameDuration: 0.2, stateDuration: 4.2)
         }
+
+        // Walk
         if !walk.isEmpty {
             poses[.walk] = PoseDefinition(frames: walk, frameDuration: 0.115, stateDuration: 9.4)
         }
-        if let sleep {
-            poses[.sleep] = PoseDefinition(frames: [sleep], frameDuration: 0.2, stateDuration: 8.0)
+
+        // Sleep: multi-frame or single
+        let sleepFrames = [
+            external.loadSprite(named: "cat_sleep_01.png"),
+            external.loadSprite(named: "cat_sleep_02.png"),
+            external.loadSprite(named: "cat_sleep_03.png"),
+            external.loadSprite(named: "cat_sleep_02.png")
+        ].compactMap { $0 }
+        if sleepFrames.count >= 3 {
+            poses[.sleep] = PoseDefinition(frames: sleepFrames, frameDuration: 2.5, stateDuration: 8.0)
+        } else if let sleepSingle {
+            poses[.sleep] = PoseDefinition(frames: [sleepSingle], frameDuration: 0.2, stateDuration: 8.0)
         }
         return poses
     }

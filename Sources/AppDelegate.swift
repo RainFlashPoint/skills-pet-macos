@@ -4,18 +4,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var petWindow: PetWindow?
     private var aiSettingsWindow: AIModelSettingsWindowController?
+    private var terminalAssistantWindow: TerminalAssistantSettingsWindowController?
     private let external = ExternalPaths()
     private let petPackGenerator: PetAssetGenerating = PetPackGenerator()
     private var visibilityTimer: Timer?
     private var frontingTimer: Timer?
+    private var terminalAssistantTimer: Timer?
+    private var reportedTerminalSessionIDs = Set<String>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         debugLog("applicationDidFinishLaunching start")
         NSApp.setActivationPolicy(.accessory)
         ensurePetWindow(forceCenter: true)
         setupStatusItem()
+        setupTerminalAssistantNotifications()
         startVisibilityWatchdog()
         startFrontingWatchdog()
+        startTerminalAssistantMonitor()
         debugLog("status item ready")
     }
 
@@ -39,6 +44,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = AIModelSettingsWindowController()
         aiSettingsWindow = controller
         controller.show()
+    }
+
+    @objc private func openTerminalAssistantSettings() {
+        let controller = TerminalAssistantSettingsWindowController()
+        terminalAssistantWindow = controller
+        controller.show()
+    }
+
+    @objc private func launchCodexCLI() {
+        launchCLI(.codex)
+    }
+
+    @objc private func launchClaudeCLI() {
+        launchCLI(.claude)
+    }
+
+    @objc private func approveFrontmostTerminal() {
+        let settings = TerminalAssistantSettingsStore.shared.load()
+        guard settings.isEnabled, settings.allowOneClickEnter else {
+            showMessage(
+                title: L("确认助手未启用", "Approval Assistant Disabled"),
+                message: L("请先在“Codex/Claude 确认助手...”里启用一键确认。", "Enable one-click approval in Codex/Claude Approval Assistant first.")
+            )
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = L("向 Codex/Claude 终端发送 Enter？", "Send Return to Codex/Claude terminal?")
+        alert.informativeText = L("这会确认前台 Codex/Claude CLI 当前等待的提示。请确认它不是删除、重置、sudo 或安装类高风险操作。", "This approves the prompt currently waiting in the frontmost Codex/Claude CLI. Confirm it is not a deletion, reset, sudo, or install-like high-risk action.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L("发送 Enter", "Send Return"))
+        alert.addButton(withTitle: L("取消", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        if !TerminalAssistantController.sendReturnToFrontmostTerminal() {
+            showMessage(
+                title: L("发送失败", "Send Failed"),
+                message: L("没有成功发送 Enter。如果你用的是 Apple Terminal 或 iTerm，请允许本 App 自动化控制终端；其它终端仍需要辅助功能权限。", "Could not send Return. If you use Apple Terminal or iTerm, allow this app to automate the terminal; other terminals still require Accessibility permission.")
+            )
+        }
     }
 
     @objc private func importPetImage() {
@@ -101,6 +146,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshStatusMenu()
     }
 
+    private func setupTerminalAssistantNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openTerminalAssistantSettings),
+            name: .openTerminalAssistantSettings,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(approveFrontmostTerminal),
+            name: .approveFrontmostTerminalPrompt,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(launchCodexCLI),
+            name: .launchCodexCLI,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(launchClaudeCLI),
+            name: .launchClaudeCLI,
+            object: nil
+        )
+    }
+
     private func startVisibilityWatchdog() {
         let timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             self?.ensurePetWindow(forceCenter: false)
@@ -118,6 +190,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer.tolerance = 0.5
         RunLoop.main.add(timer, forMode: .common)
         frontingTimer = timer
+    }
+
+    private func startTerminalAssistantMonitor() {
+        reportedTerminalSessionIDs.formUnion(TerminalAssistantController.completedSessionNotices().map(\.id))
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            let agents = TerminalAssistantController.discoverAgentProcesses()
+            _ = TerminalAssistantController.autoConfirmIfNeeded(agents: agents)
+            self?.reportCompletedTerminalSessions()
+            self?.reportProcessBasedSessionNotices(agents)
+        }
+        timer.tolerance = 0.4
+        RunLoop.main.add(timer, forMode: .common)
+        terminalAssistantTimer = timer
     }
 
     private func ensurePetWindow(forceCenter: Bool) {
@@ -154,6 +239,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshStatusMenu()
     }
 
+    private func launchCLI(_ cli: TerminalCLIKind) {
+        if !TerminalAssistantController.launchCLI(cli) {
+            showMessage(
+                title: L("启动失败", "Launch Failed"),
+                message: L("没有成功打开 Apple Terminal。请确认系统允许本 App 自动化控制终端。", "Could not open Apple Terminal. Confirm this app is allowed to automate Terminal.")
+            )
+        }
+    }
+
+    private func reportCompletedTerminalSessions() {
+        for notice in TerminalAssistantController.completedSessionNotices() {
+            guard !reportedTerminalSessionIDs.contains(notice.id) else { continue }
+            reportedTerminalSessionIDs.insert(notice.id)
+
+            let message: String
+            let isError: Bool
+            switch notice.state {
+            case .finished:
+                message = L("\(notice.cliName) 任务已完成", "\(notice.cliName) finished")
+                isError = false
+            case .failed(let code):
+                message = L("\(notice.cliName) 已退出，状态码 \(code)", "\(notice.cliName) exited with code \(code)")
+                isError = true
+            }
+
+            NotificationCenter.default.post(
+                name: .terminalAssistantSessionNotice,
+                object: nil,
+                userInfo: [
+                    "message": message,
+                    "isError": isError
+                ]
+            )
+        }
+    }
+
+    private func reportProcessBasedSessionNotices(_ agents: [TerminalAssistantController.AgentProcess]) {
+        for notice in TerminalAssistantController.processBasedSessionNotices(currentProcesses: agents) {
+            guard !reportedTerminalSessionIDs.contains(notice.id) else { continue }
+            reportedTerminalSessionIDs.insert(notice.id)
+
+            let message: String
+            let isError: Bool
+            switch notice.state {
+            case .finished:
+                message = L("\(notice.cliName) 任务已完成", "\(notice.cliName) finished")
+                isError = false
+            case .failed(let code):
+                message = L("\(notice.cliName) 已退出，状态码 \(code)", "\(notice.cliName) exited with code \(code)")
+                isError = true
+            }
+
+            NotificationCenter.default.post(
+                name: .terminalAssistantSessionNotice,
+                object: nil,
+                userInfo: ["message": message, "isError": isError]
+            )
+        }
+    }
+
     private func showMessage(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
@@ -181,9 +326,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: L("打开技能中心", "Open Skills Hub"), action: #selector(openHub), keyEquivalent: "o"))
         menu.addItem(NSMenuItem(title: L("打开技能目录", "Open Catalog"), action: #selector(openCatalog), keyEquivalent: "c"))
-        menu.addItem(NSMenuItem(title: L("导入宠物图片...", "Import Pet Image..."), action: #selector(importPetImage), keyEquivalent: "i"))
+        menu.addItem(petImageMenuItem())
         menu.addItem(NSMenuItem(title: L("AI 模型设置...", "AI Model Settings..."), action: #selector(openAIModelSettings), keyEquivalent: ","))
-        menu.addItem(NSMenuItem(title: L("切回默认猫", "Use Default Cat"), action: #selector(useDefaultCat), keyEquivalent: "d"))
+        menu.addItem(NSMenuItem(title: L("确认助手...", "Approval Assistant..."), action: #selector(openTerminalAssistantSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(modeMenuItem())
         menu.addItem(languageMenuItem())
@@ -195,6 +340,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.items.forEach { $0.target = self }
         statusItem.menu = menu
+    }
+
+    private func petImageMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: L("宠物图片", "Pet Image"), action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: L("宠物图片", "Pet Image"))
+
+        let importItem = NSMenuItem(title: L("导入宠物图片...", "Import Pet Image..."), action: #selector(importPetImage), keyEquivalent: "i")
+        importItem.target = self
+        submenu.addItem(importItem)
+
+        let defaultItem = NSMenuItem(title: L("切回默认猫", "Use Default Cat"), action: #selector(useDefaultCat), keyEquivalent: "d")
+        defaultItem.target = self
+        submenu.addItem(defaultItem)
+
+        item.submenu = submenu
+        return item
     }
 
     private func modeMenuItem() -> NSMenuItem {
@@ -469,6 +630,30 @@ struct ExternalPaths {
                 "walk_06.png",
                 fileName
             ])
+        case "cat_recline_01.png":
+            return SpriteAlias(packCandidates: ["recline_01.png", fileName])
+        case "cat_recline_02.png":
+            return SpriteAlias(packCandidates: ["recline_02.png", fileName])
+        case "cat_recline_03.png":
+            return SpriteAlias(packCandidates: ["recline_03.png", fileName])
+        case "cat_loaf_01.png":
+            return SpriteAlias(packCandidates: ["loaf_01.png", fileName])
+        case "cat_loaf_02.png":
+            return SpriteAlias(packCandidates: ["loaf_02.png", fileName])
+        case "cat_loaf_03.png":
+            return SpriteAlias(packCandidates: ["loaf_03.png", fileName])
+        case "cat_sit_01.png":
+            return SpriteAlias(packCandidates: ["sit_01.png", fileName])
+        case "cat_sit_02.png":
+            return SpriteAlias(packCandidates: ["sit_02.png", fileName])
+        case "cat_sit_03.png":
+            return SpriteAlias(packCandidates: ["sit_03.png", fileName])
+        case "cat_sleep_01.png":
+            return SpriteAlias(packCandidates: ["sleep_01.png", fileName])
+        case "cat_sleep_02.png":
+            return SpriteAlias(packCandidates: ["sleep_02.png", fileName])
+        case "cat_sleep_03.png":
+            return SpriteAlias(packCandidates: ["sleep_03.png", fileName])
         default:
             return SpriteAlias(packCandidates: [fileName])
         }

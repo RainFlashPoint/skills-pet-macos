@@ -88,6 +88,8 @@ build/SkillsPetLite-bin
 - 状态栏菜单：显示桌宠、居中桌宠、打开 Hub / Catalog、退出
 - 状态栏 `Import Pet Image...`：打开导入工作台，添加参考图并配置生成提示词
 - 状态栏 `AI 模型设置...`：配置 AI 增强生成的供应商、模型、Endpoint、质量模式和 API Key
+- 状态栏 `Codex/Claude 确认助手...`：配置 Codex CLI / Claude CLI 终端确认辅助
+- 状态栏 / 桌宠右键菜单：可从桌宠启动 Codex / Claude，也可一键确认当前 Codex/Claude 提示
 - 状态栏 `Use Default Cat`：切回内置默认猫素材
 - 状态栏 `语言 / Language`：在中文和英文界面之间切换，默认中文
 - 模式切换：`自由乱动` / `右下角停靠`
@@ -162,6 +164,27 @@ Model: gpt-image-1.5
 ```
 
 API Key 会保存到 macOS Keychain；其它配置保存到 `UserDefaults`。当前 `测试配置` 只检查必填项，不会发起网络请求；真实 API 调用会在后续 `ModelPetPackGenerator` 中接入。
+
+## Codex / Claude Approval Assistant
+
+桌宠右键菜单和状态栏菜单都提供 Codex / Claude CLI 确认入口：
+
+- 从桌宠启动 Codex
+- 从桌宠启动 Claude
+- 确认当前 Codex/Claude 提示
+- 打开 Codex/Claude 确认助手设置
+
+第一版是安全的一键确认，不做无条件自动回车：
+
+- `从桌宠启动 Codex / Claude` 会使用 Apple Terminal 新开一个终端会话并执行 `codex` 或 `claude`
+- 由桌宠启动的 Codex / Claude 结束后，桌宠会显示完成或失败状态码提示
+- 需要先在 `Codex/Claude 确认助手...` 中启用
+- 需要 macOS 辅助功能权限
+- 只会向前台 Codex CLI / Claude CLI 所在终端发送一次 Enter
+- 发送前会弹窗确认
+- 不做无条件自动确认；所有确认都需要用户主动触发
+
+当前仅面向 Codex CLI 和 Claude CLI 的人工辅助确认。删除、重置、`sudo`、联网安装等高风险提示仍然必须人工判断。
 
 把你自己的宠物素材放到：
 

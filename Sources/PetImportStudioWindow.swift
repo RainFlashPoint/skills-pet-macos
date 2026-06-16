@@ -12,6 +12,7 @@ final class PetImportStudioWindowController: NSWindowController {
 
     private var result: PetImportStudioResult?
     private var imageURLs: [URL] = []
+    private var generationCancelled = false
 
     private let imageListLabel = NSTextField(labelWithString: L("还没有添加参考图", "No reference images yet"))
     private let petNameField = NSTextField()
@@ -26,7 +27,7 @@ final class PetImportStudioWindowController: NSWindowController {
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
@@ -98,7 +99,13 @@ final class PetImportStudioWindowController: NSWindowController {
         title.textColor = NSColor(calibratedRed: 0.15, green: 0.10, blue: 0.07, alpha: 1)
         stack.addArrangedSubview(title)
 
-        let copy = NSTextField(wrappingLabelWithString: L("如果有多张图可以一起添加。当前本地兜底会使用第一张图生成；保存下来的多图和提示词就是后续模型 API 要使用的输入。", "Add several images if you have them. The local fallback uses the first image, while the saved prompt and references are the exact input shape the future model API will consume."))
+        let aiEnabled = AIModelSettingsStore.shared.load().isEnabled
+        let copyText = aiEnabled
+            ? L("添加参考图后点击生成，AI 会为每个姿态单独生成高质量素材图。走路帧由本地派生。",
+                "Add reference images and generate. AI will create high-quality sprites for each pose. Walk frames are derived locally.")
+            : L("如果有多张图可以一起添加。当前会使用第一张图本地生成。配置 AI 模型后可用 AI 生成更好的效果。",
+                "Add images and generate. Currently uses the first image for local generation. Configure an AI model for better results.")
+        let copy = NSTextField(wrappingLabelWithString: copyText)
         copy.font = .systemFont(ofSize: 13)
         copy.textColor = NSColor(calibratedRed: 0.39, green: 0.30, blue: 0.22, alpha: 1)
         copy.widthAnchor.constraint(equalToConstant: 780).isActive = true
@@ -184,7 +191,13 @@ final class PetImportStudioWindowController: NSWindowController {
         row.spacing = 12
         row.alignment = .centerY
 
-        let hint = NSTextField(wrappingLabelWithString: L("这里会先生成一个本地候选结果。应用前你还会看到最终预览。", "This creates a local candidate first. You will still review the generated pet before applying it."))
+        let aiEnabled = AIModelSettingsStore.shared.load().isEnabled
+        let hintText = aiEnabled
+            ? L("AI 模式会调用模型 API 生成 4 个关键姿态，走路帧由本地派生。如失败会自动回退本地生成。",
+                "AI mode calls the model API for 4 key poses; walk frames are derived locally. Falls back to local on failure.")
+            : L("这里会先生成一个本地候选结果。应用前你还会看到最终预览。",
+                "This creates a local candidate first. You will still review the generated pet before applying it.")
+        let hint = NSTextField(wrappingLabelWithString: hintText)
         hint.font = .systemFont(ofSize: 12)
         hint.textColor = NSColor(calibratedRed: 0.43, green: 0.33, blue: 0.25, alpha: 1)
         hint.widthAnchor.constraint(equalToConstant: 580).isActive = true
@@ -263,20 +276,92 @@ final class PetImportStudioWindowController: NSWindowController {
 
     @objc private func generatePreview() {
         guard let primary = imageURLs.first else {
-            showInlineAlert(title: L("请至少添加一张图片", "Add at least one image"), message: L("本地兜底生成需要至少一张参考图。", "The local fallback needs one reference image before it can generate a preview."))
+            showInlineAlert(title: L("请至少添加一张图片", "Add at least one image"), message: L("需要至少一张参考图才能生成。", "At least one reference image is needed to generate."))
             return
         }
 
         generateButton.isEnabled = false
-        generateButton.title = L("生成中...", "Generating...")
-        defer {
-            generateButton.isEnabled = true
-            generateButton.title = L("生成预览", "Generate Preview")
-        }
+        generationCancelled = false
 
+        let aiSettings = AIModelSettingsStore.shared.load()
+        let apiKey = AIModelSettingsStore.shared.loadAPIKey()
+        let useAI = aiSettings.isEnabled
+            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !aiSettings.endpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        if useAI {
+            generateButton.title = L("AI 生成中 0/10...", "AI generating 0/10...")
+            let petName = petNameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let style = selectedStylePrompt()
+            let notes = notesTextView.string
+            let rootURL = self.rootURL
+            let localGenerator = self.generator
+
+            let imageURLsCopy = self.imageURLs
+
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let aiGenerator = AIPackGenerator(
+                    settings: aiSettings,
+                    apiKey: apiKey,
+                    petName: petName,
+                    style: style,
+                    notes: notes,
+                    imageURLs: imageURLsCopy
+                )
+                aiGenerator.onProgress = { [weak self] status in
+                    DispatchQueue.main.async { self?.generateButton.title = status }
+                }
+                aiGenerator.isCancelled = { [weak self] in self?.generationCancelled ?? true }
+
+                do {
+                    let pack = try aiGenerator.generatePetPack(from: primary, rootURL: rootURL)
+                    DispatchQueue.main.async {
+                        self?.finishGeneration(pack: pack, primary: primary, generatorMode: "ai-api-v1")
+                    }
+                } catch AIPackGeneratorError.cancelled {
+                    DispatchQueue.main.async {
+                        self?.generateButton.isEnabled = true
+                        self?.generateButton.title = L("生成预览", "Generate Preview")
+                    }
+                } catch {
+                    debugLog("AI generation failed: \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        self?.generateButton.title = L("AI 失败，本地生成中...", "AI failed, local fallback...")
+                    }
+                    do {
+                        let pack = try localGenerator.generatePetPack(from: primary, rootURL: rootURL)
+                        DispatchQueue.main.async {
+                            self?.finishGeneration(pack: pack, primary: primary, generatorMode: "local-fallback-after-ai-failure")
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self?.generateButton.isEnabled = true
+                            self?.generateButton.title = L("生成预览", "Generate Preview")
+                            self?.showInlineAlert(title: L("生成失败", "Generation failed"), message: error.localizedDescription)
+                        }
+                    }
+                }
+            }
+        } else {
+            generateButton.title = L("生成中...", "Generating...")
+            defer {
+                generateButton.isEnabled = true
+                generateButton.title = L("生成预览", "Generate Preview")
+            }
+            do {
+                let pack = try generator.generatePetPack(from: primary, rootURL: rootURL)
+                finishGeneration(pack: pack, primary: primary, generatorMode: "local-fallback-first-image")
+            } catch {
+                showInlineAlert(title: L("生成失败", "Generation failed"), message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func finishGeneration(pack: GeneratedPetPack, primary: URL, generatorMode: String) {
+        generateButton.isEnabled = true
+        generateButton.title = L("生成预览", "Generate Preview")
         do {
-            let pack = try generator.generatePetPack(from: primary, rootURL: rootURL)
-            try writeImportConfiguration(to: pack.directory)
+            try writeImportConfiguration(to: pack.directory, generatorMode: generatorMode)
             result = PetImportStudioResult(pack: pack, sourceImageURL: primary)
             closeModal()
         } catch {
@@ -285,6 +370,7 @@ final class PetImportStudioWindowController: NSWindowController {
     }
 
     @objc private func cancel() {
+        generationCancelled = true
         result = nil
         closeModal()
     }
@@ -319,6 +405,7 @@ final class PetImportStudioWindowController: NSWindowController {
 
     private func styleOptions() -> [(title: String, prompt: String)] {
         [
+            (L("真实照片", "Realistic photo"), "Realistic photograph, photorealistic, same real cat, natural lighting, high detail"),
             (L("柔和贴纸插画", "Soft sticker illustration"), "Soft sticker illustration"),
             (L("像素风精灵", "Pixel art sprite"), "Pixel art sprite"),
             (L("3D 毛绒玩具", "3D plush toy"), "3D plush toy"),
@@ -336,14 +423,14 @@ final class PetImportStudioWindowController: NSWindowController {
         return options[index].prompt
     }
 
-    private func writeImportConfiguration(to directory: URL) throws {
+    private func writeImportConfiguration(to directory: URL, generatorMode: String = "local-fallback-first-image") throws {
         let payload: [String: Any] = [
             "schema": 1,
             "pet_name": petNameField.stringValue,
             "style": selectedStylePrompt(),
             "prompt": generatedPrompt(),
             "reference_images": imageURLs.map(\.path),
-            "generator_mode": "local-fallback-first-image",
+            "generator_mode": generatorMode,
             "future_model_input_ready": true
         ]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])

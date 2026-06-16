@@ -47,6 +47,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
   <string>NSApplication</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>SkillsPetLite needs permission to send a confirmation Return key to Terminal or iTerm for Codex/Claude CLI prompts.</string>
 </dict>
 </plist>
 PLIST
@@ -58,6 +60,7 @@ swiftc \
   -framework AppKit \
   -framework Vision \
   -framework Security \
+  -framework ApplicationServices \
   "$ROOT"/Sources/*.swift \
   -o "$TMP_BIN"
 

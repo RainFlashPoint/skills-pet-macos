@@ -20,7 +20,7 @@ enum AIProvider: String, CaseIterable {
 
     var defaultModel: String {
         switch self {
-        case .apiyi: return "gpt-image-2-all"
+        case .apiyi: return "gemini-2.5-flash-image"
         case .openAI: return "gpt-image-1.5"
         case .fal: return "fal-ai/flux-kontext"
         case .replicate: return "black-forest-labs/flux-kontext-pro"
@@ -30,7 +30,7 @@ enum AIProvider: String, CaseIterable {
 
     var defaultEndpoint: String {
         switch self {
-        case .apiyi: return "https://api.apiyi.com/v1/images/edits"
+        case .apiyi: return "https://api.apiyi.com/v1/chat/completions"
         case .openAI: return "https://api.openai.com/v1/images/edits"
         case .fal: return "https://fal.run/"
         case .replicate: return "https://api.replicate.com/v1/predictions"

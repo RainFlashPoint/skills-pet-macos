@@ -28,7 +28,7 @@ enum PetPackGeneratorError: LocalizedError {
 }
 
 final class PetPackGenerator: PetAssetGenerating {
-    private struct Variant {
+    struct Variant {
         let fileName: String
         let scaleX: CGFloat
         let scaleY: CGFloat
@@ -37,8 +37,18 @@ final class PetPackGenerator: PetAssetGenerating {
         let offsetY: CGFloat
     }
 
+    static let targetCanvas = CGSize(width: 512, height: 384)
+
+    static let walkVariants: [Variant] = [
+        Variant(fileName: "walk_01.png", scaleX: 1.04, scaleY: 0.94, rotation: -0.070, offsetX: -28, offsetY: -6),
+        Variant(fileName: "walk_02.png", scaleX: 0.94, scaleY: 1.10, rotation: 0.040, offsetX: -16, offsetY: 18),
+        Variant(fileName: "walk_03.png", scaleX: 1.06, scaleY: 0.92, rotation: 0.075, offsetX: 0, offsetY: 0),
+        Variant(fileName: "walk_04.png", scaleX: 0.93, scaleY: 1.12, rotation: -0.035, offsetX: 16, offsetY: 20),
+        Variant(fileName: "walk_05.png", scaleX: 1.04, scaleY: 0.94, rotation: -0.080, offsetX: 28, offsetY: -4),
+        Variant(fileName: "walk_06.png", scaleX: 0.96, scaleY: 1.08, rotation: 0.050, offsetX: 10, offsetY: 16)
+    ]
+
     private let fileManager = FileManager.default
-    private let targetCanvas = CGSize(width: 512, height: 384)
 
     func generatePetPack(from imageURL: URL, rootURL: URL) throws -> GeneratedPetPack {
         guard let source = NSImage(contentsOf: imageURL),
@@ -46,22 +56,22 @@ final class PetPackGenerator: PetAssetGenerating {
             throw PetPackGeneratorError.cannotLoadImage
         }
 
-        let prepared = foregroundSegmentedImage(from: cgImage) ?? cgImage
-        let trimmed = try trimmedImage(from: prepared)
-        let packName = uniquePackName(baseName: imageURL.deletingPathExtension().lastPathComponent, rootURL: rootURL)
+        let prepared = Self.foregroundSegmentedImage(from: cgImage) ?? cgImage
+        let trimmed = try Self.trimmedImage(from: prepared)
+        let packName = Self.uniquePackName(baseName: imageURL.deletingPathExtension().lastPathComponent, rootURL: rootURL)
         let packDirectory = rootURL.appendingPathComponent(packName, isDirectory: true)
         try fileManager.createDirectory(at: packDirectory, withIntermediateDirectories: true)
 
         for variant in variants() {
-            let image = try renderVariant(trimmed, variant: variant)
-            try writePNG(image, to: packDirectory.appendingPathComponent(variant.fileName))
+            let image = try Self.renderVariant(trimmed, variant: variant)
+            try Self.writePNG(image, to: packDirectory.appendingPathComponent(variant.fileName))
         }
 
         let manifest = """
         {
           "schema": 1,
-          "name": "\(jsonEscape(packName))",
-          "source": "\(jsonEscape(imageURL.lastPathComponent))",
+          "name": "\(Self.jsonEscape(packName))",
+          "source": "\(Self.jsonEscape(imageURL.lastPathComponent))",
           "generator": "local-procedural-v1",
           "notes": "Generated from one image. Motions are procedural; model-generated poses can replace these files later."
         }
@@ -86,7 +96,7 @@ final class PetPackGenerator: PetAssetGenerating {
         ]
     }
 
-    private func foregroundSegmentedImage(from image: CGImage) -> CGImage? {
+    static func foregroundSegmentedImage(from image: CGImage) -> CGImage? {
         guard #available(macOS 14.0, *) else { return nil }
 
         let request = VNGenerateForegroundInstanceMaskRequest()
@@ -118,7 +128,7 @@ final class PetPackGenerator: PetAssetGenerating {
         }
     }
 
-    private func trimmedImage(from image: CGImage) throws -> CGImage {
+    static func trimmedImage(from image: CGImage) throws -> CGImage {
         let width = image.width
         let height = image.height
         let bytesPerPixel = 4
@@ -182,7 +192,7 @@ final class PetPackGenerator: PetAssetGenerating {
         return context.makeImage()?.cropping(to: cropRect) ?? image
     }
 
-    private func edgeConnectedWhiteBackground(in pixels: UnsafeMutablePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int) -> Set<Int> {
+    private static func edgeConnectedWhiteBackground(in pixels: UnsafeMutablePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int) -> Set<Int> {
         var visited = Array(repeating: false, count: width * height)
         var background = Set<Int>()
         var queue: [Int] = []
@@ -230,9 +240,9 @@ final class PetPackGenerator: PetAssetGenerating {
         return background
     }
 
-    private func renderVariant(_ source: CGImage, variant: Variant) throws -> CGImage {
-        let width = Int(targetCanvas.width)
-        let height = Int(targetCanvas.height)
+    static func renderVariant(_ source: CGImage, variant: Variant) throws -> CGImage {
+        let width = Int(Self.targetCanvas.width)
+        let height = Int(Self.targetCanvas.height)
         let bytesPerPixel = 4
         let bytesPerRow = width * bytesPerPixel
 
@@ -248,17 +258,17 @@ final class PetPackGenerator: PetAssetGenerating {
             throw PetPackGeneratorError.cannotRenderImage
         }
 
-        context.clear(CGRect(origin: .zero, size: targetCanvas))
+        context.clear(CGRect(origin: .zero, size: Self.targetCanvas))
         context.interpolationQuality = .high
 
-        let maxDrawWidth = targetCanvas.width * 0.72
-        let maxDrawHeight = targetCanvas.height * 0.74
+        let maxDrawWidth = Self.targetCanvas.width * 0.72
+        let maxDrawHeight = Self.targetCanvas.height * 0.74
         let sourceSize = CGSize(width: source.width, height: source.height)
         let baseScale = min(maxDrawWidth / sourceSize.width, maxDrawHeight / sourceSize.height)
         let drawSize = CGSize(width: sourceSize.width * baseScale, height: sourceSize.height * baseScale)
 
         context.saveGState()
-        context.translateBy(x: targetCanvas.width / 2 + variant.offsetX, y: targetCanvas.height * 0.48 + variant.offsetY)
+        context.translateBy(x: Self.targetCanvas.width / 2 + variant.offsetX, y: Self.targetCanvas.height * 0.48 + variant.offsetY)
         context.rotate(by: variant.rotation)
         context.scaleBy(x: variant.scaleX, y: variant.scaleY)
         let drawRect = CGRect(x: -drawSize.width / 2, y: -drawSize.height / 2, width: drawSize.width, height: drawSize.height)
@@ -271,7 +281,43 @@ final class PetPackGenerator: PetAssetGenerating {
         return rendered
     }
 
-    private func writePNG(_ image: CGImage, to url: URL) throws {
+    static func renderVariantInPlace(_ source: CGImage, variant: Variant) throws -> CGImage {
+        let width = source.width
+        let height = source.height
+
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw PetPackGeneratorError.cannotRenderImage
+        }
+
+        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        context.interpolationQuality = .high
+
+        let cx = CGFloat(width) / 2 + variant.offsetX
+        let cy = CGFloat(height) / 2 + variant.offsetY
+
+        context.saveGState()
+        context.translateBy(x: cx, y: cy)
+        context.rotate(by: variant.rotation)
+        context.scaleBy(x: variant.scaleX, y: variant.scaleY)
+        let drawRect = CGRect(x: -CGFloat(width) / 2, y: -CGFloat(height) / 2, width: CGFloat(width), height: CGFloat(height))
+        context.draw(source, in: drawRect)
+        context.restoreGState()
+
+        guard let rendered = context.makeImage() else {
+            throw PetPackGeneratorError.cannotRenderImage
+        }
+        return rendered
+    }
+
+    static func writePNG(_ image: CGImage, to url: URL) throws {
         let rep = NSBitmapImageRep(cgImage: image)
         guard let data = rep.representation(using: .png, properties: [:]) else {
             throw PetPackGeneratorError.cannotCreatePNG
@@ -279,18 +325,18 @@ final class PetPackGenerator: PetAssetGenerating {
         try data.write(to: url, options: .atomic)
     }
 
-    private func uniquePackName(baseName: String, rootURL: URL) -> String {
-        let cleanBase = sanitizedPackName(baseName).isEmpty ? "custom-pet" : sanitizedPackName(baseName)
+    static func uniquePackName(baseName: String, rootURL: URL) -> String {
+        let cleanBase = Self.sanitizedPackName(baseName).isEmpty ? "custom-pet" : Self.sanitizedPackName(baseName)
         var candidate = cleanBase
         var suffix = 2
-        while fileManager.fileExists(atPath: rootURL.appendingPathComponent(candidate, isDirectory: true).path) {
+        while FileManager.default.fileExists(atPath: rootURL.appendingPathComponent(candidate, isDirectory: true).path) {
             candidate = "\(cleanBase)-\(suffix)"
             suffix += 1
         }
         return candidate
     }
 
-    private func sanitizedPackName(_ value: String) -> String {
+    static func sanitizedPackName(_ value: String) -> String {
         let lowercased = value.lowercased()
         let mapped = lowercased.map { character -> Character in
             if character.isLetter || character.isNumber {
@@ -304,7 +350,7 @@ final class PetPackGenerator: PetAssetGenerating {
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
-    private func jsonEscape(_ value: String) -> String {
+    static func jsonEscape(_ value: String) -> String {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
