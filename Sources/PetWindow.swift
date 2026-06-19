@@ -19,7 +19,7 @@ final class PetWindow: NSPanel, NSWindowDelegate {
         static let behaviorModeKey = "petBehaviorMode"
         static let roamingPositionKey = "petWindowOrigin.roaming"
         static let dockedPositionKey = "petWindowOrigin.docked"
-        static let dockMargin: CGFloat = 16
+        static let dockMargin: CGFloat = 0
     }
 
     private let external: ExternalPaths
@@ -75,9 +75,9 @@ final class PetWindow: NSPanel, NSWindowDelegate {
     }
 
     func moveToDockedCorner() {
-        guard let screen = currentVisibleFrame() else { return }
-        let x = screen.maxX - frame.width - Constants.dockMargin
-        let y = screen.minY + Constants.dockMargin
+        guard let visible = currentVisibleFrame() else { return }
+        let x = visible.maxX - frame.width
+        let y = visible.minY
         setFrameOrigin(NSPoint(x: x, y: y))
         savePosition()
     }

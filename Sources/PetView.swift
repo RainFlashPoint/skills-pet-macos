@@ -139,8 +139,11 @@ final class PetView: NSView {
         let scale = min(maxWidth / frameImage.size.width, maxHeight / frameImage.size.height) * drawState.scale
         let drawSize = NSSize(width: frameImage.size.width * scale, height: frameImage.size.height * scale)
         let dockOffset = dockedMotionOffset(for: currentPose)
+        let xBase = behaviorMode == .docked
+            ? bounds.width - drawSize.width - 4
+            : (bounds.width - drawSize.width) / 2
         let baseRect = NSRect(
-            x: (bounds.width - drawSize.width) / 2 + lookOffset + earTwitchOffset().x + dockOffset.x,
+            x: xBase + lookOffset + earTwitchOffset().x + dockOffset.x,
             y: (bounds.height - drawSize.height) / 2 + drawState.verticalOffset + earTwitchOffset().y + dockOffset.y,
             width: drawSize.width,
             height: drawSize.height
@@ -151,6 +154,27 @@ final class PetView: NSView {
         drawBlink(in: baseRect, pose: currentPose)
         drawTerminalAssistantStatus()
         drawTerminalSessionNotice()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let bmp = bitmapImageRep(for: bounds) else { return super.hitTest(point) }
+        let local = convert(point, from: superview)
+        let px = Int(local.x), py = Int(CGFloat(bmp.pixelsHigh) - local.y)
+        guard px >= 0, py >= 0, px < bmp.pixelsWide, py < bmp.pixelsHigh else { return nil }
+        let alpha = bmp.colorAt(x: px, y: py)?.alphaComponent ?? 0
+        return alpha > 0.05 ? self : nil
+    }
+
+    private func bitmapImageRep(for rect: NSRect) -> NSBitmapImageRep? {
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+            pixelsWide: Int(rect.width), pixelsHigh: Int(rect.height),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        draw(rect)
+        NSGraphicsContext.restoreGraphicsState()
+        return rep
     }
 
     override func mouseDown(with event: NSEvent) {
